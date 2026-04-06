@@ -37,3 +37,4 @@ coverage/
 
 # GCP
 service-account-key.json
+github-actions-key.json

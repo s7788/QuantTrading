@@ -5,12 +5,13 @@ FROM node:20-alpine AS shared-builder
 WORKDIR /app
 
 COPY package.json ./
+COPY package-lock.json ./
 COPY packages/shared/package.json packages/shared/
 COPY packages/shared/tsconfig.json packages/shared/
 COPY packages/shared/src/ packages/shared/src/
 COPY tsconfig.json ./
 
-RUN npm install --workspace=packages/shared
+RUN npm ci
 RUN npm run build -w packages/shared
 
 # ─────────────────────────────────────────────────────────────
@@ -20,6 +21,7 @@ FROM node:20-alpine AS client-builder
 WORKDIR /app
 
 COPY package.json ./
+COPY package-lock.json ./
 COPY packages/shared/package.json packages/shared/
 COPY packages/client/package.json packages/client/
 COPY tsconfig.json ./
@@ -27,7 +29,7 @@ COPY tsconfig.json ./
 # Copy built shared dist
 COPY --from=shared-builder /app/packages/shared/dist packages/shared/dist
 
-RUN npm install --workspace=packages/client
+RUN npm ci
 
 COPY packages/client/ packages/client/
 
@@ -40,13 +42,16 @@ FROM node:20-alpine AS server-builder
 WORKDIR /app
 
 COPY package.json ./
+COPY package-lock.json ./
 COPY packages/shared/package.json packages/shared/
+COPY packages/shared/tsconfig.json packages/shared/
+COPY packages/shared/src/ packages/shared/src/
 COPY packages/server/package.json packages/server/
 COPY tsconfig.json ./
 
 COPY --from=shared-builder /app/packages/shared/dist packages/shared/dist
 
-RUN npm install --workspace=packages/server
+RUN npm ci
 
 COPY packages/server/ packages/server/
 
@@ -63,6 +68,7 @@ ENV PORT=8080
 
 # Only production dependencies
 COPY package.json ./
+COPY package-lock.json ./
 COPY packages/server/package.json packages/server/
 COPY packages/shared/package.json packages/shared/
 
@@ -70,7 +76,7 @@ COPY --from=shared-builder /app/packages/shared/dist packages/shared/dist
 COPY --from=server-builder /app/packages/server/dist packages/server/dist
 COPY --from=client-builder /app/packages/client/dist packages/client/dist
 
-RUN npm install --workspace=packages/server --omit=dev
+RUN npm ci --omit=dev
 
 EXPOSE 8080
 

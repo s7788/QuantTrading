@@ -1,7 +1,24 @@
-import yahooFinance from 'yahoo-finance2';
 import axios from 'axios';
 import type { Market, OHLCV, Symbol, DataSyncStatus } from '@quant/shared';
 import { logger } from '../utils/logger.js';
+
+interface YahooChartResponse {
+  chart?: {
+    result?: Array<{
+      timestamp?: number[];
+      indicators?: {
+        quote?: Array<{
+          open?: Array<number | null>;
+          high?: Array<number | null>;
+          low?: Array<number | null>;
+          close?: Array<number | null>;
+          volume?: Array<number | null>;
+        }>;
+      };
+    }>;
+    error?: { description?: string };
+  };
+}
 
 // ============================================================
 // DataSyncService
@@ -55,15 +72,13 @@ export class DataSyncService {
 
   // ── US Market via Yahoo Finance ───────────────────────────
   private async syncUS(): Promise<void> {
-    // yahoo-finance2 does not require API key
-    // Fetches adjusted OHLCV, splits, dividends for US stocks
     const symbols = await this.getSymbols('us');
     let done = 0;
 
     for (const sym of symbols.slice(0, 50)) { // batch limit per run
       try {
-        await yahooFinance.historical(sym.code, {
-          period1: new Date(Date.now() - 7 * 86400_000), // last 7 days
+        await this.fetchUsHistorical(sym.code, {
+          period1: new Date(Date.now() - 7 * 86400_000),
           interval: '1d',
         });
         done++;
@@ -103,21 +118,74 @@ export class DataSyncService {
   ): Promise<OHLCV[]> {
     // TODO: read from Cloud Storage cache first, fall back to live fetch
     if (market === 'us') {
-      const results = await yahooFinance.historical(symbol, {
+      return this.fetchUsHistorical(symbol, {
         period1: options.from || new Date(Date.now() - 365 * 86400_000),
         period2: options.to,
         interval: options.freq === 'daily' ? '1d' : '1wk',
       });
-      return results.map((r) => ({
-        date: r.date.toISOString().slice(0, 10),
-        open: r.open ?? 0,
-        high: r.high ?? 0,
-        low: r.low ?? 0,
-        close: r.close ?? 0,
-        volume: r.volume ?? 0,
-      }));
     }
     // TODO: TW OHLCV from TWSE / FinMind cache
     return [];
+  }
+
+  private async fetchUsHistorical(
+    symbol: string,
+    options: { period1?: string | Date; period2?: string | Date; interval: '1d' | '1wk' }
+  ): Promise<OHLCV[]> {
+    const period1 = this.toUnixTimestamp(options.period1 ?? new Date(Date.now() - 365 * 86400_000));
+    const period2 = this.toUnixTimestamp(options.period2 ?? new Date());
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}`;
+
+    const { data } = await axios.get<YahooChartResponse>(url, {
+      params: {
+        interval: options.interval,
+        period1,
+        period2,
+        includePrePost: false,
+        events: 'div,splits',
+      },
+      timeout: 30_000,
+    });
+
+    const result = data.chart?.result?.[0];
+    const quote = result?.indicators?.quote?.[0];
+    const timestamps = result?.timestamp ?? [];
+
+    if (!result || !quote) {
+      const message = data.chart?.error?.description || `Yahoo chart response missing data for ${symbol}`;
+      throw new Error(message);
+    }
+
+    return timestamps.flatMap((timestamp, index) => {
+      const open = quote.open?.[index];
+      const high = quote.high?.[index];
+      const low = quote.low?.[index];
+      const close = quote.close?.[index];
+      const volume = quote.volume?.[index];
+
+      if (
+        open == null ||
+        high == null ||
+        low == null ||
+        close == null ||
+        volume == null
+      ) {
+        return [];
+      }
+
+      return [{
+        date: new Date(timestamp * 1000).toISOString().slice(0, 10),
+        open,
+        high,
+        low,
+        close,
+        volume,
+      }];
+    });
+  }
+
+  private toUnixTimestamp(value: string | Date): number {
+    const date = value instanceof Date ? value : new Date(value);
+    return Math.floor(date.getTime() / 1000);
   }
 }

@@ -18,7 +18,7 @@ interface Props {
 
 export function Badge({ children, variant = 'gray', color }: Props) {
   const style = color
-    ? { background: `${color}22`, color }
+    ? { bg: `${color}22`, text: color }
     : COLORS[variant];
 
   return (

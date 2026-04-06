@@ -146,8 +146,7 @@ export default function AppLayout() {
           {/* Collapse toggle */}
           <button onClick={() => setSidebarOpen(!sidebarOpen)}
                   className="flex justify-center p-3"
-                  style={{ borderTop: '1px solid var(--color-border)',
-                           background: 'transparent', border: 'none',
+                  style={{ background: 'transparent', border: 'none',
                            color: 'var(--color-text-2)', cursor: 'pointer',
                            borderTop: '1px solid var(--color-border)' }}>
             {sidebarOpen ? <ChevronLeft size={16} /> : <ChevronRight size={16} />}

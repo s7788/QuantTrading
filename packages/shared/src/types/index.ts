@@ -92,6 +92,7 @@ export type TradeAction = 'buy' | 'sell';
 export interface Position {
   id: string;
   symbol: string;
+  name?: string;
   market: Market;
   direction: TradeDirection;
   quantity: number;

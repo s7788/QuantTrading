@@ -93,6 +93,8 @@ jobs:
     runs-on: ubuntu-latest
     needs: build-and-push
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    outputs:
+      url: ${{ steps.deploy.outputs.url }}
     environment:
       name: production
       url: ${{ steps.deploy.outputs.url }}
@@ -153,7 +155,7 @@ jobs:
     steps:
       - name: Health check
         run: |
-          URL="${{ needs.deploy.outputs.url || 'skip' }}"
+          URL="${{ needs.deploy.outputs.url }}"
           if [[ "${URL}" == "skip" ]]; then exit 0; fi
           for i in 1 2 3; do
             STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${URL}/api/health")
