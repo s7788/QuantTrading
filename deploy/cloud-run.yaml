@@ -1,0 +1,48 @@
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: quant-trading
+  namespace: stock-decision-assistant
+  labels:
+    app: quant-trading
+    env: production
+  annotations:
+    run.googleapis.com/ingress: all
+spec:
+  template:
+    metadata:
+      annotations:
+        # Scale to zero when idle (cost saving)
+        autoscaling.knative.dev/minScale: "0"
+        autoscaling.knative.dev/maxScale: "2"
+        # CPU only allocated during request processing
+        run.googleapis.com/cpu-throttling: "true"
+    spec:
+      containerConcurrency: 80
+      timeoutSeconds: 300
+      serviceAccountName: quant-trading-sa@stock-decision-assistant.iam.gserviceaccount.com
+      containers:
+        - image: asia-east1-docker.pkg.dev/stock-decision-assistant/quant/quant-trading:latest
+          ports:
+            - containerPort: 8080
+          env:
+            - name: NODE_ENV
+              value: production
+            - name: GCP_PROJECT_ID
+              value: stock-decision-assistant
+            - name: GCP_REGION
+              value: asia-east1
+          # Secret env vars from Secret Manager
+          envFrom: []
+          resources:
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          livenessProbe:
+            httpGet:
+              path: /api/health
+            initialDelaySeconds: 10
+            periodSeconds: 30
+  traffic:
+    - percent: 100
+      latestRevision: true

@@ -1,0 +1,168 @@
+name: Build & Deploy to Cloud Run
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:      # Allow manual trigger
+
+env:
+  PROJECT_ID: stock-decision-assistant
+  REGION: asia-east1
+  SERVICE_NAME: quant-trading
+  IMAGE: asia-east1-docker.pkg.dev/stock-decision-assistant/quant/quant-trading
+
+jobs:
+  # ──────────────────────────────────────────────────────────
+  # Job 1: Lint & Type-check
+  # ──────────────────────────────────────────────────────────
+  lint:
+    name: Lint & Type Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type check (shared)
+        run: npm run build -w packages/shared
+
+      - name: Type check (server)
+        run: npx tsc --noEmit -p packages/server/tsconfig.json
+
+      - name: Type check (client)
+        run: npx tsc --noEmit -p packages/client/tsconfig.json
+
+  # ──────────────────────────────────────────────────────────
+  # Job 2: Build Docker image & push to Artifact Registry
+  # Only on push to main
+  # ──────────────────────────────────────────────────────────
+  build-and-push:
+    name: Build Docker Image
+    runs-on: ubuntu-latest
+    needs: lint
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    outputs:
+      image-tag: ${{ steps.meta.outputs.tags }}
+      image-digest: ${{ steps.build.outputs.digest }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
+
+      - name: Set image metadata
+        id: meta
+        run: |
+          SHORT_SHA="${GITHUB_SHA::7}"
+          echo "tags=${{ env.IMAGE }}:${SHORT_SHA},${{ env.IMAGE }}:latest" >> $GITHUB_OUTPUT
+          echo "short-sha=${SHORT_SHA}" >> $GITHUB_OUTPUT
+
+      - name: Build and push Docker image
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          cache-from: type=registry,ref=${{ env.IMAGE }}:buildcache
+          cache-to: type=registry,ref=${{ env.IMAGE }}:buildcache,mode=max
+          labels: |
+            org.opencontainers.image.source=${{ github.repositoryUrl }}
+            org.opencontainers.image.revision=${{ github.sha }}
+
+  # ──────────────────────────────────────────────────────────
+  # Job 3: Deploy to Cloud Run
+  # ──────────────────────────────────────────────────────────
+  deploy:
+    name: Deploy to Cloud Run
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    environment:
+      name: production
+      url: ${{ steps.deploy.outputs.url }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Deploy to Cloud Run
+        id: deploy
+        uses: google-github-actions/deploy-cloudrun@v2
+        with:
+          service: ${{ env.SERVICE_NAME }}
+          region: ${{ env.REGION }}
+          image: ${{ env.IMAGE }}:latest
+          flags: |
+            --min-instances=0
+            --max-instances=2
+            --memory=512Mi
+            --cpu=1
+            --concurrency=80
+            --timeout=300
+            --service-account=quant-trading-sa@${{ env.PROJECT_ID }}.iam.gserviceaccount.com
+            --allow-unauthenticated
+          env_vars: |
+            NODE_ENV=production
+            GCP_PROJECT_ID=${{ env.PROJECT_ID }}
+            GCP_REGION=${{ env.REGION }}
+
+      - name: Show deployed URL
+        run: |
+          echo "✅ Deployed to: ${{ steps.deploy.outputs.url }}"
+
+      - name: Update Cloud Scheduler target URL
+        # Update scheduler jobs to point to the current Cloud Run URL
+        run: |
+          URL="${{ steps.deploy.outputs.url }}"
+          for JOB in sync-tw-daily sync-us-daily; do
+            MARKET=$(echo "$JOB" | grep -oP '(?<=sync-)[a-z]+')
+            gcloud scheduler jobs update http "${JOB}" \
+              --location="${{ env.REGION }}" \
+              --uri="${URL}/api/data/sync?market=${MARKET}" \
+              --quiet 2>/dev/null || true
+          done
+          echo "Scheduler jobs updated."
+
+  # ──────────────────────────────────────────────────────────
+  # Job 4: Post-deploy smoke test
+  # ──────────────────────────────────────────────────────────
+  smoke-test:
+    name: Smoke Test
+    runs-on: ubuntu-latest
+    needs: deploy
+    steps:
+      - name: Health check
+        run: |
+          URL="${{ needs.deploy.outputs.url || 'skip' }}"
+          if [[ "${URL}" == "skip" ]]; then exit 0; fi
+          for i in 1 2 3; do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${URL}/api/health")
+            if [[ "${STATUS}" == "200" ]]; then
+              echo "✅ Health check passed (HTTP 200)"
+              exit 0
+            fi
+            echo "  Attempt ${i}: HTTP ${STATUS}, retrying in 10s..."
+            sleep 10
+          done
+          echo "❌ Health check failed"
+          exit 1

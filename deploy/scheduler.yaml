@@ -1,0 +1,30 @@
+# Cloud Scheduler jobs for periodic data sync
+# Apply with: gcloud scheduler jobs create http ...
+# See scripts/setup-gcp.sh for the exact commands
+
+jobs:
+  - name: sync-tw-daily
+    description: "每日收盤後同步台股數據 (15:30 UTC+8 = 07:30 UTC)"
+    schedule: "30 7 * * 1-5"          # Weekdays 15:30 Taiwan time
+    timezone: "UTC"
+    targetType: http
+    httpTarget:
+      uri: "${CLOUD_RUN_URL}/api/data/sync?market=tw"
+      httpMethod: POST
+      headers:
+        Content-Type: application/json
+      oidcToken:
+        serviceAccountEmail: quant-trading-sa@stock-decision-assistant.iam.gserviceaccount.com
+
+  - name: sync-us-daily
+    description: "每日美股收盤後同步美股數據 (16:30 ET = 次日 05:30 UTC+8 = 21:30 UTC 前日)"
+    schedule: "30 21 * * 1-5"         # Weekdays 21:30 UTC (= 05:30 UTC+8 next day)
+    timezone: "UTC"
+    targetType: http
+    httpTarget:
+      uri: "${CLOUD_RUN_URL}/api/data/sync?market=us"
+      httpMethod: POST
+      headers:
+        Content-Type: application/json
+      oidcToken:
+        serviceAccountEmail: quant-trading-sa@stock-decision-assistant.iam.gserviceaccount.com
