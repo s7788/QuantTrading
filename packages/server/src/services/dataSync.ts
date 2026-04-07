@@ -166,7 +166,6 @@ export class DataSyncService {
       logger.debug(`[DataSync] Cache hit for ${market}:${symbol}`);
       return cached.data;
     }
-
     // 2. Try loading from Firestore
     const stored = await this.loadOhlcv(market, symbol, fromDate).catch(() => null);
     if (stored && stored.length > 0) {

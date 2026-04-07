@@ -14,6 +14,7 @@ import { backtestRouter } from './routes/backtest.js';
 import { analyticsRouter } from './routes/analytics.js';
 import { dataRouter } from './routes/data.js';
 import { settingsRouter } from './routes/settings.js';
+import { aiRouter } from './routes/ai.js';
 
 // Services
 import { setupWebSocket } from './services/websocket.js';
@@ -41,6 +42,7 @@ app.use('/api/backtest', backtestRouter);
 app.use('/api/analytics', analyticsRouter);
 app.use('/api/data', dataRouter);
 app.use('/api/settings', settingsRouter);
+app.use('/api/ai', aiRouter);
 
 // Health check (for Cloud Run)
 app.get('/api/health', (_req, res) => {
