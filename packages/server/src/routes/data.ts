@@ -28,13 +28,21 @@ dataRouter.get('/status', async (_req: Request, res: Response) => {
 // GET /api/data/ohlcv/:market/:symbol?from=&to=&freq=daily
 dataRouter.get('/ohlcv/:market/:symbol', async (req: Request, res: Response) => {
   const { market, symbol } = req.params;
+  if (!['tw', 'us'].includes(market)) {
+    return res.status(400).json({ success: false, error: 'market must be tw or us' });
+  }
   const { from, to, freq = 'daily' } = req.query;
-  const data = await syncService.getOHLCV(market as 'tw' | 'us', symbol, {
-    from: from as string,
-    to: to as string,
-    freq: freq as string,
-  });
-  res.json({ success: true, data });
+  try {
+    const data = await syncService.getOHLCV(market as 'tw' | 'us', symbol, {
+      from: from as string,
+      to: to as string,
+      freq: freq as string,
+    });
+    return res.json({ success: true, data });
+  } catch (err) {
+    logger.error('OHLCV fetch failed', { market, symbol, err });
+    return res.status(502).json({ success: false, error: String(err) });
+  }
 });
 
 // GET /api/data/symbols/:market — list available symbols

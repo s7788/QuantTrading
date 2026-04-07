@@ -29,4 +29,6 @@ export const Collections = {
   DATA_STATUS: 'dataStatus',
   BOARDS: 'boards',
   SCREENERS: 'screeners',
+  // OHLCV cache: one doc per symbol, keyed as "{market}_{symbol}"
+  OHLCV: 'ohlcv',
 } as const;
