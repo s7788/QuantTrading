@@ -128,6 +128,20 @@ export class DataSyncService {
     }
   }
 
+  // ── Fetch real-time quotes from Yahoo Finance ─────────────
+  async fetchQuotes(symbols: string[]): Promise<YahooQuoteResult[]> {
+    const url = `https://query1.finance.yahoo.com/v7/finance/quote`;
+    const { data } = await axios.get<YahooQuoteResponse>(url, {
+      params: {
+        symbols: symbols.join(','),
+        fields: 'regularMarketPrice,regularMarketChange,regularMarketChangePercent,regularMarketVolume,regularMarketDayHigh,regularMarketDayLow,regularMarketOpen,regularMarketPreviousClose,longName,shortName',
+      },
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+      timeout: 30_000,
+    });
+    return data.quoteResponse?.result ?? [];
+  }
+
   // ── Public getters ────────────────────────────────────────
   async getStatus(): Promise<Record<Market, DataSyncStatus>> {
     return this.status;
@@ -155,6 +169,7 @@ export class DataSyncService {
     symbol: string,
     options: { from?: string; to?: string; freq?: string }
   ): Promise<OHLCV[]> {
+
     const freq = options.freq === 'weekly' ? 'weekly' : 'daily';
     const interval: '1d' | '1wk' = freq === 'weekly' ? '1wk' : '1d';
     const fromDate = options.from ?? new Date(Date.now() - 365 * 86400_000).toISOString().slice(0, 10);

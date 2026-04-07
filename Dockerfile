@@ -71,6 +71,7 @@ COPY package.json ./
 COPY package-lock.json ./
 COPY packages/server/package.json packages/server/
 COPY packages/shared/package.json packages/shared/
+COPY packages/client/package.json packages/client/
 
 COPY --from=shared-builder /app/packages/shared/dist packages/shared/dist
 COPY --from=server-builder /app/packages/server/dist packages/server/dist
