@@ -3,6 +3,27 @@ import type { Market, OHLCV, Symbol, DataSyncStatus } from '@quant/shared';
 import { logger } from '../utils/logger.js';
 import { getFirestore, Collections } from './firestore.js';
 
+interface YahooQuoteResult {
+  symbol: string;
+  longName?: string;
+  shortName?: string;
+  regularMarketPrice?: number;
+  regularMarketChange?: number;
+  regularMarketChangePercent?: number;
+  regularMarketVolume?: number;
+  regularMarketDayHigh?: number;
+  regularMarketDayLow?: number;
+  regularMarketOpen?: number;
+  regularMarketPreviousClose?: number;
+}
+
+interface YahooQuoteResponse {
+  quoteResponse?: {
+    result?: YahooQuoteResult[];
+    error?: { description?: string };
+  };
+}
+
 interface YahooChartResponse {
   chart?: {
     result?: Array<{
@@ -128,6 +149,20 @@ export class DataSyncService {
     }
   }
 
+  // ── Fetch real-time quotes from Yahoo Finance ─────────────
+  async fetchQuotes(symbols: string[]): Promise<YahooQuoteResult[]> {
+    const url = `https://query1.finance.yahoo.com/v7/finance/quote`;
+    const { data } = await axios.get<YahooQuoteResponse>(url, {
+      params: {
+        symbols: symbols.join(','),
+        fields: 'regularMarketPrice,regularMarketChange,regularMarketChangePercent,regularMarketVolume,regularMarketDayHigh,regularMarketDayLow,regularMarketOpen,regularMarketPreviousClose,longName,shortName',
+      },
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+      timeout: 30_000,
+    });
+    return data.quoteResponse?.result ?? [];
+  }
+
   // ── Public getters ────────────────────────────────────────
   async getStatus(): Promise<Record<Market, DataSyncStatus>> {
     return this.status;
@@ -155,76 +190,16 @@ export class DataSyncService {
     symbol: string,
     options: { from?: string; to?: string; freq?: string }
   ): Promise<OHLCV[]> {
-    const freq = options.freq === 'weekly' ? 'weekly' : 'daily';
-    const interval: '1d' | '1wk' = freq === 'weekly' ? '1wk' : '1d';
-    const fromDate = options.from ?? new Date(Date.now() - 365 * 86400_000).toISOString().slice(0, 10);
+    // TODO: read from Cloud Storage cache first, fall back to live fetch
+    const interval = options.freq === 'daily' ? '1d' as const : '1wk' as const;
+    const period1 = options.from || new Date(Date.now() - 365 * 86400_000);
+    const period2 = options.to;
 
-    // 1. Check in-memory cache
-    const key = cacheKey(market, symbol, fromDate, freq);
-    const cached = ohlcvCache.get(key);
-    if (cached && Date.now() < cached.expiresAt) {
-      logger.debug(`[DataSync] Cache hit for ${market}:${symbol}`);
-      return cached.data;
+    if (market === 'tw') {
+      const yahooSymbol = symbol.endsWith('.TW') ? symbol : `${symbol}.TW`;
+      return this.fetchUsHistorical(yahooSymbol, { period1, period2, interval });
     }
-    // 2. Try loading from Firestore
-    const stored = await this.loadOhlcv(market, symbol, fromDate).catch(() => null);
-    if (stored && stored.length > 0) {
-      ohlcvCache.set(key, { data: stored, expiresAt: Date.now() + CACHE_TTL_MS });
-      logger.debug(`[DataSync] Firestore hit for ${market}:${symbol}`);
-      return stored;
-    }
-
-    // 3. Fetch live from Yahoo Finance
-    const yahooSymbol = market === 'tw'
-      ? (symbol.endsWith('.TW') ? symbol : `${symbol}.TW`)
-      : symbol;
-
-    const data = await this.fetchYahooOHLCV(yahooSymbol, {
-      period1: options.from || new Date(Date.now() - 365 * 86400_000),
-      period2: options.to,
-      interval,
-    });
-
-    // 4. Store in cache + Firestore (best-effort)
-    ohlcvCache.set(key, { data, expiresAt: Date.now() + CACHE_TTL_MS });
-    await this.persistOhlcv(market, symbol, data).catch((err) =>
-      logger.warn(`[DataSync] Firestore persist failed for ${market}:${symbol}`, { err })
-    );
-
-    return data;
-  }
-
-  // ── TW symbol list from TWSE Open API ────────────────────
-  private async getTWSymbols(): Promise<Symbol[]> {
-    const FALLBACK: Symbol[] = [
-      { code: '2330', name: '台積電', market: 'tw', sector: '半導體' },
-      { code: '2317', name: '鴻海',   market: 'tw', sector: '電子' },
-      { code: '2454', name: '聯發科', market: 'tw', sector: '半導體' },
-      { code: '2382', name: '廣達',   market: 'tw', sector: '電腦及週邊設備' },
-      { code: '2308', name: '台達電', market: 'tw', sector: '電子零組件' },
-      { code: '2881', name: '富邦金', market: 'tw', sector: '金融保險' },
-      { code: '2886', name: '兆豐金', market: 'tw', sector: '金融保險' },
-    ];
-
-    try {
-      const url = 'https://openapi.twse.com.tw/v1/opendata/t187ap03_L';
-      const { data } = await axios.get<TwseCompany[]>(url, { timeout: 10_000 });
-
-      if (!Array.isArray(data) || data.length === 0) return FALLBACK;
-
-      return data
-        .filter((c) => /^\d{4}$/.test(c['公司代號']))  // 4-digit stock codes only
-        .slice(0, 200)
-        .map((c) => ({
-          code: c['公司代號'],
-          name: c['公司簡稱'],
-          market: 'tw' as const,
-          sector: c['產業類別'] || '其他',
-        }));
-    } catch (err) {
-      logger.warn('[DataSync:TW] Failed to fetch symbol list from TWSE, using fallback', { err });
-      return FALLBACK;
-    }
+    return this.fetchUsHistorical(symbol, { period1, period2, interval });
   }
 
   // ── Yahoo Finance OHLCV fetch ─────────────────────────────
