@@ -116,16 +116,17 @@ export class DataSyncService {
     symbol: string,
     options: { from?: string; to?: string; freq?: string }
   ): Promise<OHLCV[]> {
-    // TODO: read from Cloud Storage cache first, fall back to live fetch
+    const interval = options.freq === 'weekly' ? '1wk' : '1d';
+    const period1 = options.from || new Date(Date.now() - 365 * 86400_000);
+    const period2 = options.to;
+
     if (market === 'us') {
-      return this.fetchUsHistorical(symbol, {
-        period1: options.from || new Date(Date.now() - 365 * 86400_000),
-        period2: options.to,
-        interval: options.freq === 'daily' ? '1d' : '1wk',
-      });
+      return this.fetchUsHistorical(symbol, { period1, period2, interval });
     }
-    // TODO: TW OHLCV from TWSE / FinMind cache
-    return [];
+
+    // TW stocks: Yahoo Finance supports them with .TW suffix (e.g. 2330.TW)
+    const yahooSymbol = symbol.endsWith('.TW') ? symbol : `${symbol}.TW`;
+    return this.fetchUsHistorical(yahooSymbol, { period1, period2, interval });
   }
 
   private async fetchUsHistorical(

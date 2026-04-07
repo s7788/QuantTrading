@@ -66,8 +66,11 @@ export const compareBacktests = (ids: string[]) =>
 // ── Analytics ─────────────────────────────────────────────────
 export const getMarketOverview = (market: string) =>
   api.get(`/analytics/market-overview?market=${market}`);
-export const getSymbolData = (market: string, code: string) =>
-  api.get(`/analytics/symbol/${market}/${code}`);
+export const getSymbolData = (
+  market: string,
+  code: string,
+  params?: { from?: string; to?: string; freq?: string }
+) => api.get(`/analytics/symbol/${market}/${code}`, { params });
 export const runScreener = (data: unknown) =>
   api.post('/analytics/screener', data);
 export const getBoards = () => api.get('/analytics/boards');
