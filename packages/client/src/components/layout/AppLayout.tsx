@@ -2,7 +2,9 @@ import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, FlaskConical, Bot, BarChart3,
   Settings, Bell, Moon, Sun, ChevronLeft, ChevronRight,
+
   Zap, RefreshCw, Globe, TrendingUp,
+
 } from 'lucide-react';
 import { useAppStore } from '@/stores/appStore';
 import { syncData } from '@/services/api';
