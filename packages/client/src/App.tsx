@@ -13,6 +13,7 @@ import MarketOverviewPage from '@/pages/analytics/MarketOverviewPage';
 import SymbolAnalysisPage from '@/pages/analytics/SymbolAnalysisPage';
 import ScreenerPage from '@/pages/analytics/ScreenerPage';
 import BoardPage from '@/pages/analytics/BoardPage';
+import TwStockPredictionPage from '@/pages/analytics/TwStockPredictionPage';
 import SettingsPage from '@/pages/SettingsPage';
 import { useAppStore } from '@/stores/appStore';
 import { socketService } from '@/services/socket';
@@ -48,6 +49,7 @@ export default function App() {
         <Route path="/analytics/symbol/:market/:code" element={<SymbolAnalysisPage />} />
         <Route path="/analytics/screener" element={<ScreenerPage />} />
         <Route path="/analytics/board/:id" element={<BoardPage />} />
+        <Route path="/analytics/tw-prediction" element={<TwStockPredictionPage />} />
         <Route path="/settings" element={<SettingsPage />} />
       </Route>
     </Routes>
