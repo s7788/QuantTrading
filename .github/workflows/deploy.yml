@@ -125,6 +125,7 @@ jobs:
             NODE_ENV=production
             GCP_PROJECT_ID=${{ env.PROJECT_ID }}
             GCP_REGION=${{ env.REGION }}
+            GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}
 
       - name: Show deployed URL
         run: |

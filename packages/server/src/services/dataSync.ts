@@ -53,21 +53,23 @@ export class DataSyncService {
     }
   }
 
-  // ── Taiwan Stock Exchange (TWSE) ──────────────────────────
+  // ── Taiwan Stocks via Yahoo Finance (.TW suffix) ─────────
   private async syncTW(): Promise<void> {
-    // 1. Fetch daily trading data from TWSE Open API
-    const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-    const url = `https://www.twse.com.tw/exchangeReport/MI_INDEX?response=json&date=${today}&type=ALL`;
-    const res = await axios.get(url, { timeout: 30_000 });
-    logger.debug('[DataSync:TW] TWSE response received', { rows: res.data?.data9?.length });
+    const symbols = await this.getSymbols('tw');
+    let done = 0;
 
-    // 2. Fetch additional data from FinMind (community free tier)
-    // https://finmindtrade.com/analysis/#/data/api
-    // Rate limit: 600 requests/hour without token
-    // TODO: store FinMind token in Secret Manager when needed
-
-    // 3. Parse and store to Cloud Storage / Firestore
-    // TODO: implement storage write
+    for (const sym of symbols.slice(0, 50)) {
+      try {
+        await this.fetchUsHistorical(`${sym.code}.TW`, {
+          period1: new Date(Date.now() - 7 * 86400_000),
+          interval: '1d',
+        });
+        done++;
+        this.status.tw.progress = Math.round((done / symbols.length) * 100);
+      } catch (err) {
+        logger.warn(`[DataSync:TW] Failed for ${sym.code}`, { err });
+      }
+    }
   }
 
   // ── US Market via Yahoo Finance ───────────────────────────
@@ -95,19 +97,37 @@ export class DataSyncService {
   }
 
   async getSymbols(market: Market): Promise<Symbol[]> {
-    // TODO: fetch symbol list from Firestore / Cloud Storage cache
-    // Returning stubs for now
     if (market === 'tw') {
       return [
         { code: '2330', name: '台積電', market: 'tw', sector: '半導體' },
         { code: '2317', name: '鴻海', market: 'tw', sector: '電子' },
         { code: '2454', name: '聯發科', market: 'tw', sector: '半導體' },
+        { code: '2308', name: '台達電', market: 'tw', sector: '電子' },
+        { code: '2382', name: '廣達', market: 'tw', sector: '電子' },
+        { code: '2412', name: '中華電', market: 'tw', sector: '電信' },
+        { code: '2303', name: '聯電', market: 'tw', sector: '半導體' },
+        { code: '3711', name: '日月光投控', market: 'tw', sector: '半導體' },
+        { code: '2881', name: '富邦金', market: 'tw', sector: '金融' },
+        { code: '2882', name: '國泰金', market: 'tw', sector: '金融' },
+        { code: '2886', name: '兆豐金', market: 'tw', sector: '金融' },
+        { code: '1301', name: '台塑', market: 'tw', sector: '塑化' },
+        { code: '1303', name: '南亞', market: 'tw', sector: '塑化' },
+        { code: '2002', name: '中鋼', market: 'tw', sector: '鋼鐵' },
+        { code: '2891', name: '中信金', market: 'tw', sector: '金融' },
       ];
     }
     return [
       { code: 'AAPL', name: 'Apple Inc.', market: 'us', sector: 'Technology' },
       { code: 'TSLA', name: 'Tesla Inc.', market: 'us', sector: 'Consumer Discretionary' },
       { code: 'NVDA', name: 'NVIDIA Corp.', market: 'us', sector: 'Technology' },
+      { code: 'MSFT', name: 'Microsoft Corp.', market: 'us', sector: 'Technology' },
+      { code: 'GOOGL', name: 'Alphabet Inc.', market: 'us', sector: 'Technology' },
+      { code: 'AMZN', name: 'Amazon.com Inc.', market: 'us', sector: 'Consumer Discretionary' },
+      { code: 'META', name: 'Meta Platforms Inc.', market: 'us', sector: 'Technology' },
+      { code: 'TSM', name: 'Taiwan Semiconductor ADR', market: 'us', sector: 'Technology' },
+      { code: 'JPM', name: 'JPMorgan Chase', market: 'us', sector: 'Financials' },
+      { code: 'SPY', name: 'S&P 500 ETF', market: 'us', sector: 'ETF' },
+      { code: 'QQQ', name: 'Nasdaq-100 ETF', market: 'us', sector: 'ETF' },
     ];
   }
 
@@ -124,8 +144,12 @@ export class DataSyncService {
         interval: options.freq === 'daily' ? '1d' : '1wk',
       });
     }
-    // TODO: TW OHLCV from TWSE / FinMind cache
-    return [];
+    // TW stocks: append .TW suffix for Yahoo Finance
+    return this.fetchUsHistorical(`${symbol}.TW`, {
+      period1: options.from || new Date(Date.now() - 365 * 86400_000),
+      period2: options.to,
+      interval: options.freq === 'weekly' ? '1wk' : '1d',
+    });
   }
 
   private async fetchUsHistorical(
