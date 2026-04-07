@@ -2,6 +2,27 @@ import axios from 'axios';
 import type { Market, OHLCV, Symbol, DataSyncStatus } from '@quant/shared';
 import { logger } from '../utils/logger.js';
 
+interface YahooQuoteResult {
+  symbol: string;
+  longName?: string;
+  shortName?: string;
+  regularMarketPrice?: number;
+  regularMarketChange?: number;
+  regularMarketChangePercent?: number;
+  regularMarketVolume?: number;
+  regularMarketDayHigh?: number;
+  regularMarketDayLow?: number;
+  regularMarketOpen?: number;
+  regularMarketPreviousClose?: number;
+}
+
+interface YahooQuoteResponse {
+  quoteResponse?: {
+    result?: YahooQuoteResult[];
+    error?: { description?: string };
+  };
+}
+
 interface YahooChartResponse {
   chart?: {
     result?: Array<{
@@ -89,6 +110,20 @@ export class DataSyncService {
     }
   }
 
+  // ── Fetch real-time quotes from Yahoo Finance ─────────────
+  async fetchQuotes(symbols: string[]): Promise<YahooQuoteResult[]> {
+    const url = `https://query1.finance.yahoo.com/v7/finance/quote`;
+    const { data } = await axios.get<YahooQuoteResponse>(url, {
+      params: {
+        symbols: symbols.join(','),
+        fields: 'regularMarketPrice,regularMarketChange,regularMarketChangePercent,regularMarketVolume,regularMarketDayHigh,regularMarketDayLow,regularMarketOpen,regularMarketPreviousClose,longName,shortName',
+      },
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+      timeout: 30_000,
+    });
+    return data.quoteResponse?.result ?? [];
+  }
+
   // ── Public getters ────────────────────────────────────────
   async getStatus(): Promise<Record<Market, DataSyncStatus>> {
     return this.status;
@@ -117,15 +152,15 @@ export class DataSyncService {
     options: { from?: string; to?: string; freq?: string }
   ): Promise<OHLCV[]> {
     // TODO: read from Cloud Storage cache first, fall back to live fetch
-    if (market === 'us') {
-      return this.fetchUsHistorical(symbol, {
-        period1: options.from || new Date(Date.now() - 365 * 86400_000),
-        period2: options.to,
-        interval: options.freq === 'daily' ? '1d' : '1wk',
-      });
+    const interval = options.freq === 'daily' ? '1d' as const : '1wk' as const;
+    const period1 = options.from || new Date(Date.now() - 365 * 86400_000);
+    const period2 = options.to;
+
+    if (market === 'tw') {
+      const yahooSymbol = symbol.endsWith('.TW') ? symbol : `${symbol}.TW`;
+      return this.fetchUsHistorical(yahooSymbol, { period1, period2, interval });
     }
-    // TODO: TW OHLCV from TWSE / FinMind cache
-    return [];
+    return this.fetchUsHistorical(symbol, { period1, period2, interval });
   }
 
   private async fetchUsHistorical(

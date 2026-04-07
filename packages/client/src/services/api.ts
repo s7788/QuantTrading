@@ -66,6 +66,11 @@ export const compareBacktests = (ids: string[]) =>
 // ── Analytics ─────────────────────────────────────────────────
 export const getMarketOverview = (market: string) =>
   api.get(`/analytics/market-overview?market=${market}`);
+export const getOHLCV = (
+  market: string,
+  symbol: string,
+  params?: { from?: string; to?: string; freq?: string }
+) => api.get(`/data/ohlcv/${market}/${symbol}`, { params });
 export const getSymbolData = (market: string, code: string) =>
   api.get(`/analytics/symbol/${market}/${code}`);
 export const runScreener = (data: unknown) =>
