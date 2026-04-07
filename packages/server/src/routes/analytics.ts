@@ -27,6 +27,7 @@ const TW_MOVER_SYMBOLS = [
   '3008.TW', '2881.TW',
 ];
 
+
 // GET /api/analytics/market-overview?market=tw
 analyticsRouter.get('/market-overview', async (req: Request, res: Response) => {
   const { market = 'tw' } = req.query;
@@ -76,10 +77,41 @@ analyticsRouter.get('/market-overview', async (req: Request, res: Response) => {
   }
 });
 
-// GET /api/analytics/symbol/:market/:code — OHLCV + stats for a symbol
+// GET /api/analytics/symbol/:market/:code?from=&to=&freq=daily — OHLCV + stats for a symbol
 analyticsRouter.get('/symbol/:market/:code', async (req: Request, res: Response) => {
   const { market, code } = req.params;
-  res.json({ success: true, data: null, market, code });
+  if (!['tw', 'us'].includes(market)) {
+    return res.status(400).json({ success: false, error: 'market must be tw or us' });
+  }
+  const { from, to, freq = 'daily' } = req.query;
+  try {
+    const ohlcv = await syncService.getOHLCV(market as 'tw' | 'us', code, {
+      from: from as string,
+      to: to as string,
+      freq: freq as string,
+    });
+
+    // Compute basic stats from last bar
+    const last = ohlcv[ohlcv.length - 1];
+    const prev = ohlcv[ohlcv.length - 2];
+    const change = last && prev ? +(last.close - prev.close).toFixed(4) : 0;
+    const changePercent = last && prev ? +((change / prev.close) * 100).toFixed(2) : 0;
+
+    return res.json({
+      success: true,
+      data: {
+        ohlcv,
+        quote: last
+          ? { price: last.close, change, changePercent, volume: last.volume, date: last.date }
+          : null,
+      },
+      market,
+      code,
+    });
+  } catch (err) {
+    logger.error('Symbol analytics fetch failed', { market, code, err });
+    return res.status(502).json({ success: false, error: String(err) });
+  }
 });
 
 // POST /api/analytics/screener — run screener with conditions

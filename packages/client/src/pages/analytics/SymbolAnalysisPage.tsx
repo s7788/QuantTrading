@@ -32,25 +32,26 @@ const periodToDays: Record<string, number> = { '1m': 30, '3m': 90, '6m': 180, '1
 
 interface NewsRow { date:string; title:string; source:string; sentiment:'positive'|'negative'|'neutral'; }
 const NEWS: NewsRow[] = [
-  { date:'2025-03-15', title:'法說會：Q2 AI晶片需求旺盛，上調全年營收指引', source:'經濟日報',    sentiment:'positive' },
-  { date:'2025-03-12', title:'外資連買 5 日，持股比例升至 78.2%',              source:'工商時報',   sentiment:'positive' },
-  { date:'2025-03-10', title:'CoWoS 封裝產能供不應求，客戶排隊至 2026 年',    source:'電子時報',   sentiment:'positive' },
-  { date:'2025-03-08', title:'美國對台半導體出口管制新規草案曝光',             source:'Reuters',    sentiment:'negative' },
-  { date:'2025-03-05', title:'台積電宣布分拆子公司管理先進封裝業務',           source:'MoneyDJ',    sentiment:'neutral'  },
+  { date:'2025-03-15', title:'法說會：Q2 AI晶片需求旺盛，上調全年營收指引', source:'經濟日報',  sentiment:'positive' },
+  { date:'2025-03-12', title:'外資連買 5 日，持股比例升至 78.2%',            source:'工商時報', sentiment:'positive' },
+  { date:'2025-03-10', title:'CoWoS 封裝產能供不應求，客戶排隊至 2026 年',  source:'電子時報', sentiment:'positive' },
+  { date:'2025-03-08', title:'美國對台半導體出口管制新規草案曝光',           source:'Reuters',  sentiment:'negative' },
+  { date:'2025-03-05', title:'台積電宣布分拆子公司管理先進封裝業務',         source:'MoneyDJ',  sentiment:'neutral'  },
 ];
 
 const TABS = [
-  { key:'price',     label:'價格圖表' },
-  { key:'tech',      label:'技術分析' },
-  { key:'fund',      label:'基本面'   },
-  { key:'news',      label:'新聞'     },
+  { key:'price', label:'價格圖表' },
+  { key:'tech',  label:'技術分析' },
+  { key:'fund',  label:'基本面'   },
+  { key:'news',  label:'新聞'     },
 ];
-
 const PERIODS = [{ k:'1m',l:'1月' },{ k:'3m',l:'3月' },{ k:'6m',l:'6月' },{ k:'1y',l:'1年' }];
+
 
 function toDateLabel(dateStr: string): string {
   const d = new Date(dateStr);
   return `${d.getMonth()+1}/${d.getDate()}`;
+
 }
 
 export default function SymbolAnalysisPage() {
@@ -138,6 +139,7 @@ export default function SymbolAnalysisPage() {
             <span className="text-base" style={{ color:'var(--color-text-2)' }}>{info.name}</span>
             <Badge variant="blue">{info.sector}</Badge>
           </div>
+
           <div className="flex items-center gap-3 mt-0.5">
             {loading ? (
               <span className="text-sm" style={{color:'var(--color-text-2)'}}>載入中...</span>
@@ -155,6 +157,7 @@ export default function SymbolAnalysisPage() {
               </>
             ) : null}
           </div>
+
         </div>
         <div className="flex gap-2">
           <button onClick={() => setWatchlisted(!watchlisted)}
@@ -179,6 +182,7 @@ export default function SymbolAnalysisPage() {
         <div className="flex gap-3 flex-wrap">
           <StatCard label="今日最高" value={`${market==='tw'?'NT$':'$'}${latest.high.toLocaleString()}`} />
           <StatCard label="今日最低" value={`${market==='tw'?'NT$':'$'}${latest.low.toLocaleString()}`} />
+
           <StatCard label="成交量"   value={`${latest.vol.toLocaleString()}張`} />
           <StatCard label="市值"     value={info.mktCap} />
           <StatCard label="本益比"   value={info.pe ? info.pe.toFixed(1) : '—'} />
@@ -209,8 +213,20 @@ export default function SymbolAnalysisPage() {
         )}
       </div>
 
+      {/* Loading / error state */}
+      {loading && (
+        <div className="text-sm text-center py-8" style={{ color:'var(--color-text-2)' }}>
+          載入 {code} 資料中...
+        </div>
+      )}
+      {error && !loading && (
+        <div className="text-sm text-center py-8" style={{ color:'#f85149' }}>
+          載入失敗：{error}
+        </div>
+      )}
+
       {/* Price chart */}
-      {tab === 'price' && (
+      {!loading && !error && tab === 'price' && chartData.length > 0 && (
         <div className="flex flex-col gap-4">
           <SectionCard title="收盤價走勢">
             {loading ? (
@@ -264,7 +280,7 @@ export default function SymbolAnalysisPage() {
       )}
 
       {/* Technical analysis */}
-      {tab === 'tech' && (
+      {!loading && !error && tab === 'tech' && chartData.length > 14 && (
         <div className="flex flex-col gap-4">
           <div className="flex gap-4">
             <SectionCard title="RSI (14)" style={{ flex:1 }}>
@@ -351,6 +367,7 @@ export default function SymbolAnalysisPage() {
                 ['產業',       info.sector, ''],
                 ['52週最高',   latest ? `${market==='tw'?'NT$':'$'}${Math.max(...ohlcv.map(d=>d.high)).toLocaleString()}` : '—', ''],
                 ['52週最低',   latest ? `${market==='tw'?'NT$':'$'}${Math.min(...ohlcv.map(d=>d.low)).toLocaleString()}` : '—', ''],
+
               ].map(([l,v,u]) => (
                 <div key={l} className="flex items-center justify-between py-2"
                      style={{ borderBottom:'1px solid var(--color-border)' }}>

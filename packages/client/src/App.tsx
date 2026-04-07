@@ -9,10 +9,12 @@ import BacktestComparePage from '@/pages/backtest/BacktestComparePage';
 import StrategyListPage from '@/pages/strategy/StrategyListPage';
 import StrategyEditorPage from '@/pages/strategy/StrategyEditorPage';
 import StrategyMonitorPage from '@/pages/strategy/StrategyMonitorPage';
+import StrategyComparePage from '@/pages/strategy/StrategyComparePage';
 import MarketOverviewPage from '@/pages/analytics/MarketOverviewPage';
 import SymbolAnalysisPage from '@/pages/analytics/SymbolAnalysisPage';
 import ScreenerPage from '@/pages/analytics/ScreenerPage';
 import BoardPage from '@/pages/analytics/BoardPage';
+import TwStockPredictionPage from '@/pages/analytics/TwStockPredictionPage';
 import SettingsPage from '@/pages/SettingsPage';
 import { useAppStore } from '@/stores/appStore';
 import { socketService } from '@/services/socket';
@@ -40,6 +42,7 @@ export default function App() {
         <Route path="/backtest/history" element={<BacktestHistoryPage />} />
         <Route path="/backtest/compare" element={<BacktestComparePage />} />
         <Route path="/strategy" element={<StrategyListPage />} />
+        <Route path="/strategy/compare" element={<StrategyComparePage />} />
         <Route path="/strategy/edit/:id" element={<StrategyEditorPage />} />
         <Route path="/strategy/edit/new" element={<StrategyEditorPage />} />
         <Route path="/strategy/monitor/:id" element={<StrategyMonitorPage />} />
@@ -48,6 +51,7 @@ export default function App() {
         <Route path="/analytics/symbol/:market/:code" element={<SymbolAnalysisPage />} />
         <Route path="/analytics/screener" element={<ScreenerPage />} />
         <Route path="/analytics/board/:id" element={<BoardPage />} />
+        <Route path="/analytics/tw-prediction" element={<TwStockPredictionPage />} />
         <Route path="/settings" element={<SettingsPage />} />
       </Route>
     </Routes>

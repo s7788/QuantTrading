@@ -66,6 +66,7 @@ export const compareBacktests = (ids: string[]) =>
 // ── Analytics ─────────────────────────────────────────────────
 export const getMarketOverview = (market: string) =>
   api.get(`/analytics/market-overview?market=${market}`);
+
 export const getOHLCV = (
   market: string,
   symbol: string,
@@ -73,6 +74,7 @@ export const getOHLCV = (
 ) => api.get(`/data/ohlcv/${market}/${symbol}`, { params });
 export const getSymbolData = (market: string, code: string) =>
   api.get(`/analytics/symbol/${market}/${code}`);
+
 export const runScreener = (data: unknown) =>
   api.post('/analytics/screener', data);
 export const getBoards = () => api.get('/analytics/boards');
@@ -87,3 +89,11 @@ export const deleteBoard = (id: string) =>
 export const getSettings = () => api.get('/settings');
 export const updateSettings = (data: unknown) => api.put('/settings', data);
 export const getDataSources = () => api.get('/settings/data-sources');
+
+// ── AI (Gemini) ────────────────────────────────────────────────
+export const analyzeStock = (symbol: string, market: string) =>
+  api.post('/ai/analyze-stock', { symbol, market });
+export const reviewStrategy = (code: string, description?: string) =>
+  api.post('/ai/strategy-review', { code, description });
+export const getMarketSummary = (market: string, topMovers?: { symbol: string; change: number }[]) =>
+  api.post('/ai/market-summary', { market, topMovers });
