@@ -1,10 +1,10 @@
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   ComposedChart, Area, Bar, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer, Cell, Line,
 } from 'recharts';
-import { ArrowLeft, TrendingUp, TrendingDown, Star, Bell } from 'lucide-react';
+import { ArrowLeft, TrendingUp, TrendingDown, Star, Bell, Search } from 'lucide-react';
 import { StatCard, SectionCard, DataTable, PnlText, Badge, TabBar } from '@/components/common';
 import type { Column } from '@/components/common/DataTable';
 
@@ -51,12 +51,50 @@ const TABS = [
 
 const PERIODS = [{ k:'1m',l:'1月' },{ k:'3m',l:'3月' },{ k:'6m',l:'6月' },{ k:'1y',l:'1年' }];
 
+// Popular TW stock suggestions
+const TW_SUGGESTIONS = [
+  { code:'2330', name:'台積電' }, { code:'2317', name:'鴻海' },
+  { code:'2454', name:'聯發科' }, { code:'2382', name:'廣達' },
+  { code:'2412', name:'中華電' }, { code:'2886', name:'兆豐金' },
+  { code:'2308', name:'台達電' }, { code:'3008', name:'大立光' },
+];
+
 export default function SymbolAnalysisPage() {
   const { market, code } = useParams<{ market:string; code:string }>();
   const navigate = useNavigate();
   const [tab, setTab] = useState('price');
   const [period, setPeriod] = useState('3m');
   const [watchlisted, setWatchlisted] = useState(false);
+  const [searchInput, setSearchInput] = useState('');
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const searchRef = useRef<HTMLDivElement>(null);
+
+  // Close suggestion dropdown on outside click
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (searchRef.current && !searchRef.current.contains(e.target as Node)) {
+        setShowSuggestions(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  const goToSymbol = (newCode: string) => {
+    const trimmed = newCode.trim().toUpperCase();
+    if (!trimmed) return;
+    const targetMarket = /^\d{4}$/.test(trimmed) ? 'tw' : (market ?? 'tw');
+    navigate(`/analytics/symbol/${targetMarket}/${trimmed}`);
+    setSearchInput('');
+    setShowSuggestions(false);
+  };
+
+  const filteredSuggestions = searchInput.length > 0
+    ? TW_SUGGESTIONS.filter(s =>
+        s.code.startsWith(searchInput) ||
+        s.name.includes(searchInput)
+      )
+    : TW_SUGGESTIONS;
 
   const info = SYM_DATA[code ?? ''] ?? { name: code, sector: '—', base: 100, mktCap:'—', pe:0, pb:0, eps:0, yield:0 };
   const ohlcv = genOHLCV(info.base, period==='1m'?22:period==='3m'?60:period==='6m'?120:240);
@@ -93,6 +131,62 @@ export default function SymbolAnalysisPage() {
                 style={{ color:'var(--color-text-2)', background:'none', border:'none', cursor:'pointer' }}>
           <ArrowLeft size={15} /> 返回
         </button>
+
+        {/* Symbol search input */}
+        <div ref={searchRef} style={{ position:'relative' }}>
+          <form onSubmit={(e) => { e.preventDefault(); goToSymbol(searchInput); }}
+                style={{ display:'flex', alignItems:'center', gap:4 }}>
+            <div style={{ position:'relative', display:'flex', alignItems:'center' }}>
+              <Search size={13} style={{ position:'absolute', left:8, color:'var(--color-text-2)', pointerEvents:'none' }} />
+              <input
+                value={searchInput}
+                onChange={(e) => { setSearchInput(e.target.value); setShowSuggestions(true); }}
+                onFocus={() => setShowSuggestions(true)}
+                placeholder="輸入台股代號…"
+                style={{
+                  paddingLeft:28, paddingRight:8, paddingTop:5, paddingBottom:5,
+                  width:150, fontSize:13, borderRadius:6,
+                  background:'var(--color-bg)', border:'1px solid var(--color-border)',
+                  color:'var(--color-text)', outline:'none',
+                }}
+              />
+            </div>
+            <button type="submit"
+                    style={{
+                      padding:'5px 10px', fontSize:12, borderRadius:6, cursor:'pointer',
+                      background:'#58a6ff', color:'#fff', border:'none', fontWeight:600,
+                    }}>
+              查詢
+            </button>
+          </form>
+
+          {/* Suggestions dropdown */}
+          {showSuggestions && filteredSuggestions.length > 0 && (
+            <div style={{
+              position:'absolute', top:'calc(100% + 4px)', left:0, zIndex:50, minWidth:180,
+              background:'var(--color-card)', border:'1px solid var(--color-border)',
+              borderRadius:8, boxShadow:'0 4px 16px rgba(0,0,0,0.3)', overflow:'hidden',
+            }}>
+              {filteredSuggestions.map((s) => (
+                <button key={s.code}
+                        onClick={() => goToSymbol(s.code)}
+                        style={{
+                          display:'flex', alignItems:'center', gap:8,
+                          width:'100%', padding:'7px 12px', textAlign:'left',
+                          background:'none', border:'none', cursor:'pointer',
+                          borderBottom:'1px solid var(--color-border)',
+                        }}
+                        onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--color-bg)')}
+                        onMouseLeave={(e) => (e.currentTarget.style.background = 'none')}
+                >
+                  <span style={{ fontSize:13, fontWeight:700, color:'#58a6ff', minWidth:36 }}>{s.code}</span>
+                  <span style={{ fontSize:12, color:'var(--color-text-2)' }}>{s.name}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
         <div className="flex-1">
           <div className="flex items-center gap-2">
             <h1 className="text-xl font-bold" style={{ color:'var(--color-text)' }}>{code}</h1>
