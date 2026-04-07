@@ -82,3 +82,11 @@ export const deleteBoard = (id: string) =>
 export const getSettings = () => api.get('/settings');
 export const updateSettings = (data: unknown) => api.put('/settings', data);
 export const getDataSources = () => api.get('/settings/data-sources');
+
+// ── AI (Gemini) ────────────────────────────────────────────────
+export const analyzeStock = (symbol: string, market: string) =>
+  api.post('/ai/analyze-stock', { symbol, market });
+export const reviewStrategy = (code: string, description?: string) =>
+  api.post('/ai/strategy-review', { code, description });
+export const getMarketSummary = (market: string, topMovers?: { symbol: string; change: number }[]) =>
+  api.post('/ai/market-summary', { market, topMovers });
