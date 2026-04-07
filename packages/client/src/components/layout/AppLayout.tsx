@@ -2,7 +2,9 @@ import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, FlaskConical, Bot, BarChart3,
   Settings, Bell, Moon, Sun, ChevronLeft, ChevronRight,
-  Zap, RefreshCw, Globe, GitCompare,
+
+  Zap, RefreshCw, Globe, TrendingUp,
+
 } from 'lucide-react';
 import { useAppStore } from '@/stores/appStore';
 import { syncData } from '@/services/api';
@@ -10,11 +12,11 @@ import { useState } from 'react';
 import type { Market } from '@quant/shared';
 
 const NAV_ITEMS = [
-  { to: '/dashboard',         label: '儀表板', Icon: LayoutDashboard },
-  { to: '/backtest/new',      label: '回測',    Icon: FlaskConical },
-  { to: '/strategy',          label: '策略',    Icon: Bot },
-  { to: '/strategy/compare',  label: '策略比較', Icon: GitCompare },
-  { to: '/analytics/market',  label: '分析',    Icon: BarChart3 },
+  { to: '/dashboard',              label: '儀表板', Icon: LayoutDashboard },
+  { to: '/backtest/new',          label: '回測',    Icon: FlaskConical },
+  { to: '/strategy',              label: '策略',    Icon: Bot },
+  { to: '/analytics/market',      label: '分析',    Icon: BarChart3 },
+  { to: '/analytics/tw-prediction', label: '台股預測', Icon: TrendingUp },
 ];
 
 const MARKETS: { id: Market; label: string; flag: string }[] = [
