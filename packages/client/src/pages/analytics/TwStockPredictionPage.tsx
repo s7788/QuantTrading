@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Search, TrendingUp, Brain, Zap, AlertTriangle } from 'lucide-react';
 import { PageHeader, SectionCard, TabBar, Badge, DataTable, PnlText } from '@/components/common';
 import type { Column } from '@/components/common/DataTable';
+import { getSymbolData } from '@/services/api';
 
 // ── Mock prediction data ─────────────────────────────────────────────────────
 
@@ -85,6 +86,76 @@ const STOCK_DB: Record<string, AnalysisResult> = {
   },
 };
 
+// ── Helpers to compute technicals from real OHLCV ───────────────────────────
+
+function smaN(closes: number[], n: number): number | null {
+  if (closes.length < n) return null;
+  const sl = closes.slice(-n);
+  return sl.reduce((a, b) => a + b, 0) / n;
+}
+
+function computeRSI(closes: number[], period = 14): number | null {
+  if (closes.length < period + 1) return null;
+  const changes = closes.slice(-(period + 1)).map((c, i, arr) => i > 0 ? c - arr[i - 1] : 0).slice(1);
+  const avgGain = changes.filter(c => c > 0).reduce((a, b) => a + b, 0) / period;
+  const avgLoss = changes.filter(c => c < 0).reduce((a, b) => a + Math.abs(b), 0) / period;
+  if (avgLoss === 0) return 100;
+  return Math.round(100 - 100 / (1 + avgGain / avgLoss));
+}
+
+function buildAnalysisFromOHLCV(code: string, name: string, sector: string, ohlcv: {close:number}[]): AnalysisResult {
+  const closes = ohlcv.map(d => d.close);
+  const last = closes[closes.length - 1];
+  const rsi = computeRSI(closes);
+  const ma20 = smaN(closes, 20);
+  const ma60 = smaN(closes, 60);
+
+  let bulls = 0; let total = 0;
+  if (rsi !== null) { total++; if (rsi > 30 && rsi < 70) bulls++; else if (rsi <= 30) bulls += 1.2; }
+  if (ma20 !== null) { total++; if (last > ma20) bulls++; }
+  if (ma20 !== null && ma60 !== null) { total++; if (ma20 > ma60) bulls++; }
+
+  const ratio = total > 0 ? bulls / total : 0.5;
+  const verdict = ratio >= 0.9 ? 'strong_buy' : ratio >= 0.65 ? 'buy' : ratio >= 0.4 ? 'hold' : 'sell';
+  const confidence = Math.min(85, Math.round(45 + ratio * 38));
+
+  const recentPct = closes.length >= 5
+    ? ((closes[closes.length - 1] - closes[closes.length - 5]) / closes[closes.length - 5]) * 100
+    : 0;
+  const predChange = +Math.min(Math.max(recentPct * 0.4, -5), 5).toFixed(1);
+  const predPrice = +(last * (1 + predChange / 100)).toFixed(1);
+
+  const tech: AnalysisResult['technicals'] = [
+    { label: 'RSI(14)', value: rsi !== null ? String(rsi) : '—',
+      status: rsi === null ? 'neutral' : rsi > 70 ? 'negative' : rsi < 30 ? 'positive' : 'positive' },
+    { label: 'MA20', value: ma20 !== null ? ma20.toFixed(1) : '—',
+      status: ma20 !== null ? (last > ma20 ? 'positive' : 'negative') : 'neutral' },
+    { label: 'MA60', value: ma60 !== null ? ma60.toFixed(1) : '—',
+      status: ma60 !== null ? (last > ma60 ? 'positive' : 'negative') : 'neutral' },
+    { label: 'MA20/60', value: ma20 !== null && ma60 !== null ? (ma20 > ma60 ? '多頭排列' : '空頭排列') : '—',
+      status: ma20 !== null && ma60 !== null ? (ma20 > ma60 ? 'positive' : 'negative') : 'neutral' },
+    { label: '52週最高', value: Math.max(...closes).toLocaleString(), status: 'neutral' },
+    { label: '52週最低', value: Math.min(...closes).toLocaleString(), status: 'neutral' },
+  ];
+
+  const factors: AnalysisResult['factors'] = [
+    { label: '趨勢動能', detail: `近5日累積${recentPct >= 0 ? '+' : ''}${recentPct.toFixed(1)}%，動能${Math.abs(recentPct) > 3 ? '明顯' : '平穩'}`, weight: 35 },
+    { label: '均線關係', detail: ma20 !== null && ma60 !== null
+        ? (ma20 > ma60 ? 'MA20站上MA60，多頭排列' : 'MA20低於MA60，空頭排列')
+        : '歷史資料不足，無法計算', weight: 30 },
+    { label: 'RSI訊號', detail: rsi !== null
+        ? (rsi > 70 ? `RSI ${rsi}，超買區，注意回檔` : rsi < 30 ? `RSI ${rsi}，超賣區，關注反彈` : `RSI ${rsi}，中性區間`)
+        : '歷史資料不足，無法計算', weight: 35 },
+  ];
+
+  return {
+    symbol: code, name, price: last, predPrice, predChange, confidence,
+    verdict: verdict as AnalysisResult['verdict'],
+    technicals: tech, factors,
+    risk: '本分析僅根據技術面指標計算，不含基本面及籌碼面資訊，僅供參考，不構成投資建議。',
+  };
+}
+
 const VERDICT_LABEL: Record<string, string> = {
   strong_buy:'強烈買進', buy:'買進', hold:'觀望', sell:'賣出',
 };
@@ -122,19 +193,30 @@ export default function TwStockPredictionPage() {
   const [notFound, setNotFound] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  const handleSearch = () => {
-    const code = query.trim();
+  const handleSearch = async () => {
+    const code = query.trim().toUpperCase();
     if (!code) return;
     setLoading(true);
     setNotFound(false);
     setResult(null);
     setAnalysisCode(code);
-    setTimeout(() => {
+
+    // Use rich mock data for curated stocks; fetch real data for everything else
+    if (STOCK_DB[code]) {
+      setTimeout(() => { setLoading(false); setResult(STOCK_DB[code]); }, 600);
+      return;
+    }
+
+    try {
+      const res = await getSymbolData('tw', code) as any;
+      const ohlcv: {close:number}[] = res?.data?.ohlcv ?? [];
+      if (!ohlcv.length) { setNotFound(true); return; }
+      setResult(buildAnalysisFromOHLCV(code, code, '—', ohlcv));
+    } catch {
+      setNotFound(true);
+    } finally {
       setLoading(false);
-      const res = STOCK_DB[code];
-      if (res) setResult(res);
-      else setNotFound(true);
-    }, 800);
+    }
   };
 
   // ── Columns for ranking table ──────────────────────────────────────────────
@@ -266,7 +348,7 @@ export default function TwStockPredictionPage() {
             <SectionCard title="">
               <div className="flex items-center justify-center gap-2 py-8" style={{color:'var(--color-text-2)'}}>
                 <AlertTriangle size={16} style={{color:'#d29922'}}/>
-                <span className="text-sm">找不到代號「{analysisCode}」，目前支援：2330、2454</span>
+                <span className="text-sm">找不到代號「{analysisCode}」，請確認代號是否為台股上市代號</span>
               </div>
             </SectionCard>
           )}
