@@ -1,10 +1,10 @@
-import { useState, useEffect } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   ComposedChart, Area, Bar, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer, Cell, Line,
 } from 'recharts';
-import { ArrowLeft, TrendingUp, TrendingDown, Star, Bell } from 'lucide-react';
+import { ArrowLeft, TrendingUp, TrendingDown, Star, Bell, Search } from 'lucide-react';
 import { StatCard, SectionCard, DataTable, PnlText, Badge, TabBar } from '@/components/common';
 import type { Column } from '@/components/common/DataTable';
 import { getOHLCV } from '@/services/api';
@@ -47,11 +47,17 @@ const TABS = [
 ];
 const PERIODS = [{ k:'1m',l:'1月' },{ k:'3m',l:'3月' },{ k:'6m',l:'6月' },{ k:'1y',l:'1年' }];
 
+// Popular TW stock suggestions
+const TW_SUGGESTIONS = [
+  { code:'2330', name:'台積電' }, { code:'2317', name:'鴻海' },
+  { code:'2454', name:'聯發科' }, { code:'2382', name:'廣達' },
+  { code:'2412', name:'中華電' }, { code:'2886', name:'兆豐金' },
+  { code:'2308', name:'台達電' }, { code:'3008', name:'大立光' },
+];
 
 function toDateLabel(dateStr: string): string {
   const d = new Date(dateStr);
   return `${d.getMonth()+1}/${d.getDate()}`;
-
 }
 
 export default function SymbolAnalysisPage() {
@@ -60,6 +66,9 @@ export default function SymbolAnalysisPage() {
   const [tab, setTab] = useState('price');
   const [period, setPeriod] = useState('3m');
   const [watchlisted, setWatchlisted] = useState(false);
+  const [searchInput, setSearchInput] = useState('');
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const searchRef = useRef<HTMLDivElement>(null);
   const [ohlcv, setOhlcv] = useState<ChartBar[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -67,6 +76,17 @@ export default function SymbolAnalysisPage() {
   const info = SYM_META[code ?? ''] ?? {
     name: code, sector: '—', mktCap:'—', pe:0, pb:0, eps:0, yield:0,
   };
+
+  // Close suggestion dropdown on outside click
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (searchRef.current && !searchRef.current.contains(e.target as Node)) {
+        setShowSuggestions(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
 
   useEffect(() => {
     if (!market || !code) return;
@@ -94,6 +114,22 @@ export default function SymbolAnalysisPage() {
       })
       .finally(() => setLoading(false));
   }, [market, code, period]);
+
+  const goToSymbol = (newCode: string) => {
+    const trimmed = newCode.trim().toUpperCase();
+    if (!trimmed) return;
+    const targetMarket = /^\d{4}$/.test(trimmed) ? 'tw' : (market ?? 'tw');
+    navigate(`/analytics/symbol/${targetMarket}/${trimmed}`);
+    setSearchInput('');
+    setShowSuggestions(false);
+  };
+
+  const filteredSuggestions = searchInput.length > 0
+    ? TW_SUGGESTIONS.filter(s =>
+        s.code.startsWith(searchInput) ||
+        s.name.includes(searchInput)
+      )
+    : TW_SUGGESTIONS;
 
   const latest = ohlcv[ohlcv.length - 1];
   const prev   = ohlcv[ohlcv.length - 2];
@@ -133,6 +169,62 @@ export default function SymbolAnalysisPage() {
                 style={{ color:'var(--color-text-2)', background:'none', border:'none', cursor:'pointer' }}>
           <ArrowLeft size={15} /> 返回
         </button>
+
+        {/* Symbol search input */}
+        <div ref={searchRef} style={{ position:'relative' }}>
+          <form onSubmit={(e) => { e.preventDefault(); goToSymbol(searchInput); }}
+                style={{ display:'flex', alignItems:'center', gap:4 }}>
+            <div style={{ position:'relative', display:'flex', alignItems:'center' }}>
+              <Search size={13} style={{ position:'absolute', left:8, color:'var(--color-text-2)', pointerEvents:'none' }} />
+              <input
+                value={searchInput}
+                onChange={(e) => { setSearchInput(e.target.value); setShowSuggestions(true); }}
+                onFocus={() => setShowSuggestions(true)}
+                placeholder="輸入台股代號…"
+                style={{
+                  paddingLeft:28, paddingRight:8, paddingTop:5, paddingBottom:5,
+                  width:150, fontSize:13, borderRadius:6,
+                  background:'var(--color-bg)', border:'1px solid var(--color-border)',
+                  color:'var(--color-text)', outline:'none',
+                }}
+              />
+            </div>
+            <button type="submit"
+                    style={{
+                      padding:'5px 10px', fontSize:12, borderRadius:6, cursor:'pointer',
+                      background:'#58a6ff', color:'#fff', border:'none', fontWeight:600,
+                    }}>
+              查詢
+            </button>
+          </form>
+
+          {/* Suggestions dropdown */}
+          {showSuggestions && filteredSuggestions.length > 0 && (
+            <div style={{
+              position:'absolute', top:'calc(100% + 4px)', left:0, zIndex:50, minWidth:180,
+              background:'var(--color-card)', border:'1px solid var(--color-border)',
+              borderRadius:8, boxShadow:'0 4px 16px rgba(0,0,0,0.3)', overflow:'hidden',
+            }}>
+              {filteredSuggestions.map((s) => (
+                <button key={s.code}
+                        onClick={() => goToSymbol(s.code)}
+                        style={{
+                          display:'flex', alignItems:'center', gap:8,
+                          width:'100%', padding:'7px 12px', textAlign:'left',
+                          background:'none', border:'none', cursor:'pointer',
+                          borderBottom:'1px solid var(--color-border)',
+                        }}
+                        onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--color-bg)')}
+                        onMouseLeave={(e) => (e.currentTarget.style.background = 'none')}
+                >
+                  <span style={{ fontSize:13, fontWeight:700, color:'#58a6ff', minWidth:36 }}>{s.code}</span>
+                  <span style={{ fontSize:12, color:'var(--color-text-2)' }}>{s.name}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
         <div className="flex-1">
           <div className="flex items-center gap-2">
             <h1 className="text-xl font-bold" style={{ color:'var(--color-text)' }}>{code}</h1>
@@ -182,7 +274,6 @@ export default function SymbolAnalysisPage() {
         <div className="flex gap-3 flex-wrap">
           <StatCard label="今日最高" value={`${market==='tw'?'NT$':'$'}${latest.high.toLocaleString()}`} />
           <StatCard label="今日最低" value={`${market==='tw'?'NT$':'$'}${latest.low.toLocaleString()}`} />
-
           <StatCard label="成交量"   value={`${latest.vol.toLocaleString()}張`} />
           <StatCard label="市值"     value={info.mktCap} />
           <StatCard label="本益比"   value={info.pe ? info.pe.toFixed(1) : '—'} />
@@ -226,61 +317,53 @@ export default function SymbolAnalysisPage() {
       )}
 
       {/* Price chart */}
-      {!loading && !error && tab === 'price' && chartData.length > 0 && (
+      {!loading && !error && tab === 'price' && ohlcv.length > 0 && (
         <div className="flex flex-col gap-4">
           <SectionCard title="收盤價走勢">
-            {loading ? (
-              <div className="flex items-center justify-center py-16 text-sm" style={{color:'var(--color-text-2)'}}>載入中...</div>
-            ) : error ? (
-              <div className="flex items-center justify-center py-16 text-sm" style={{color:'#f85149'}}>{error}</div>
-            ) : (
-              <ResponsiveContainer width="100%" height={260}>
-                <ComposedChart data={ohlcv} margin={{ top:4, right:4, bottom:0, left:0 }}>
-                  <defs>
-                    <linearGradient id="symEq" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%"  stopColor={up?'#3fb950':'#f85149'} stopOpacity={0.3}/>
-                      <stop offset="95%" stopColor={up?'#3fb950':'#f85149'} stopOpacity={0}/>
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
-                  <XAxis dataKey="label" stroke="var(--color-text-2)" tick={{ fontSize:10 }} interval={Math.floor(ohlcv.length/8)} />
-                  <YAxis stroke="var(--color-text-2)" tick={{ fontSize:10 }} width={50}
-                         domain={['auto','auto']}
-                         tickFormatter={(v) => `${v.toLocaleString()}`} />
-                  <Tooltip
-                    contentStyle={{ background:'var(--color-card)', border:'1px solid var(--color-border)', borderRadius:6, fontSize:12 }}
-                    formatter={(v:number) => [`${market==='tw'?'NT$':'$'}${v.toLocaleString()}`]}
-                  />
-                  <Area type="monotone" dataKey="close" stroke={up?'#3fb950':'#f85149'}
-                        fill="url(#symEq)" strokeWidth={2} dot={false} />
-                </ComposedChart>
-              </ResponsiveContainer>
-            )}
+            <ResponsiveContainer width="100%" height={260}>
+              <ComposedChart data={ohlcv} margin={{ top:4, right:4, bottom:0, left:0 }}>
+                <defs>
+                  <linearGradient id="symEq" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%"  stopColor={up?'#3fb950':'#f85149'} stopOpacity={0.3}/>
+                    <stop offset="95%" stopColor={up?'#3fb950':'#f85149'} stopOpacity={0}/>
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
+                <XAxis dataKey="label" stroke="var(--color-text-2)" tick={{ fontSize:10 }} interval={Math.floor(ohlcv.length/8)} />
+                <YAxis stroke="var(--color-text-2)" tick={{ fontSize:10 }} width={50}
+                       domain={['auto','auto']}
+                       tickFormatter={(v) => `${v.toLocaleString()}`} />
+                <Tooltip
+                  contentStyle={{ background:'var(--color-card)', border:'1px solid var(--color-border)', borderRadius:6, fontSize:12 }}
+                  formatter={(v:number) => [`${market==='tw'?'NT$':'$'}${v.toLocaleString()}`]}
+                />
+                <Area type="monotone" dataKey="close" stroke={up?'#3fb950':'#f85149'}
+                      fill="url(#symEq)" strokeWidth={2} dot={false} />
+              </ComposedChart>
+            </ResponsiveContainer>
           </SectionCard>
 
-          {!loading && !error && ohlcv.length > 0 && (
-            <SectionCard title="成交量">
-              <ResponsiveContainer width="100%" height={100}>
-                <ComposedChart data={ohlcv} margin={{ top:4, right:4, bottom:0, left:0 }}>
-                  <XAxis dataKey="label" stroke="var(--color-text-2)" tick={{ fontSize:10 }} interval={Math.floor(ohlcv.length/8)} />
-                  <YAxis stroke="var(--color-text-2)" tick={{ fontSize:10 }} width={50}
-                         tickFormatter={(v) => `${(v/1000).toFixed(0)}K`} />
-                  <Tooltip contentStyle={{ background:'var(--color-card)', border:'1px solid var(--color-border)', borderRadius:6, fontSize:12 }}
-                           formatter={(v:number) => [`${v.toLocaleString()} 張`, '成交量']} />
-                  <Bar dataKey="vol" radius={[2,2,0,0]}>
-                    {ohlcv.map((d, i) => (
-                      <Cell key={i} fill={d.close >= d.open ? '#3fb95088' : '#f8514988'} />
-                    ))}
-                  </Bar>
-                </ComposedChart>
-              </ResponsiveContainer>
-            </SectionCard>
-          )}
+          <SectionCard title="成交量">
+            <ResponsiveContainer width="100%" height={100}>
+              <ComposedChart data={ohlcv} margin={{ top:4, right:4, bottom:0, left:0 }}>
+                <XAxis dataKey="label" stroke="var(--color-text-2)" tick={{ fontSize:10 }} interval={Math.floor(ohlcv.length/8)} />
+                <YAxis stroke="var(--color-text-2)" tick={{ fontSize:10 }} width={50}
+                       tickFormatter={(v) => `${(v/1000).toFixed(0)}K`} />
+                <Tooltip contentStyle={{ background:'var(--color-card)', border:'1px solid var(--color-border)', borderRadius:6, fontSize:12 }}
+                         formatter={(v:number) => [`${v.toLocaleString()} 張`, '成交量']} />
+                <Bar dataKey="vol" radius={[2,2,0,0]}>
+                  {ohlcv.map((d, i) => (
+                    <Cell key={i} fill={d.close >= d.open ? '#3fb95088' : '#f8514988'} />
+                  ))}
+                </Bar>
+              </ComposedChart>
+            </ResponsiveContainer>
+          </SectionCard>
         </div>
       )}
 
       {/* Technical analysis */}
-      {!loading && !error && tab === 'tech' && chartData.length > 14 && (
+      {!loading && !error && tab === 'tech' && ohlcv.length > 14 && (
         <div className="flex flex-col gap-4">
           <div className="flex gap-4">
             <SectionCard title="RSI (14)" style={{ flex:1 }}>
@@ -367,7 +450,6 @@ export default function SymbolAnalysisPage() {
                 ['產業',       info.sector, ''],
                 ['52週最高',   latest ? `${market==='tw'?'NT$':'$'}${Math.max(...ohlcv.map(d=>d.high)).toLocaleString()}` : '—', ''],
                 ['52週最低',   latest ? `${market==='tw'?'NT$':'$'}${Math.min(...ohlcv.map(d=>d.low)).toLocaleString()}` : '—', ''],
-
               ].map(([l,v,u]) => (
                 <div key={l} className="flex items-center justify-between py-2"
                      style={{ borderBottom:'1px solid var(--color-border)' }}>
