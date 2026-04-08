@@ -226,7 +226,7 @@ export default function SymbolAnalysisPage() {
       )}
 
       {/* Price chart */}
-      {!loading && !error && tab === 'price' && chartData.length > 0 && (
+      {!loading && !error && tab === 'price' && ohlcv.length > 0 && (
         <div className="flex flex-col gap-4">
           <SectionCard title="收盤價走勢">
             {loading ? (
@@ -280,7 +280,7 @@ export default function SymbolAnalysisPage() {
       )}
 
       {/* Technical analysis */}
-      {!loading && !error && tab === 'tech' && chartData.length > 14 && (
+      {!loading && !error && tab === 'tech' && ohlcv.length > 14 && (
         <div className="flex flex-col gap-4">
           <div className="flex gap-4">
             <SectionCard title="RSI (14)" style={{ flex:1 }}>
