@@ -5,6 +5,10 @@ import { logger } from '../utils/logger.js';
 export const analyticsRouter = Router();
 const syncService = new DataSyncService();
 
+// 5-minute cache for market-overview to avoid hammering Yahoo Finance
+const overviewCache = new Map<string, { data: unknown; expiresAt: number }>();
+const OVERVIEW_TTL_MS = 5 * 60 * 1000;
+
 const US_INDEX_SYMBOLS = ['^GSPC', '^IXIC', '^DJI', '^VIX'];
 const US_INDEX_NAMES: Record<string, string> = {
   '^GSPC': 'S&P 500',
@@ -35,6 +39,13 @@ analyticsRouter.get('/market-overview', async (req: Request, res: Response) => {
   const indexSymbols = isUS ? US_INDEX_SYMBOLS : TW_INDEX_SYMBOLS;
   const moverSymbols = isUS ? US_MOVER_SYMBOLS : TW_MOVER_SYMBOLS;
   const indexNames = isUS ? US_INDEX_NAMES : TW_INDEX_NAMES;
+
+  // Serve from cache if still fresh
+  const cacheKey = String(market);
+  const cached = overviewCache.get(cacheKey);
+  if (cached && Date.now() < cached.expiresAt) {
+    return res.json({ success: true, data: cached.data, market, cached: true });
+  }
 
   try {
     const quotes = await syncService.fetchQuotes([...indexSymbols, ...moverSymbols]);
@@ -70,10 +81,17 @@ analyticsRouter.get('/market-overview', async (req: Request, res: Response) => {
     const topGainers = [...movers].sort((a, b) => b.changePercent - a.changePercent).slice(0, 5);
     const topLosers = [...movers].sort((a, b) => a.changePercent - b.changePercent).slice(0, 5);
 
-    res.json({ success: true, data: { indices, topGainers, topLosers, sectors: [] }, market });
+    const responseData = { indices, topGainers, topLosers, sectors: [] };
+    overviewCache.set(cacheKey, { data: responseData, expiresAt: Date.now() + OVERVIEW_TTL_MS });
+    return res.json({ success: true, data: responseData, market });
   } catch (err) {
     logger.error('[analytics] market-overview error', { err });
-    res.status(500).json({ success: false, error: String(err) });
+    // Return stale cache if available rather than 500
+    const stale = overviewCache.get(cacheKey);
+    if (stale) {
+      return res.json({ success: true, data: stale.data, market, stale: true });
+    }
+    return res.status(500).json({ success: false, error: String(err) });
   }
 });
 

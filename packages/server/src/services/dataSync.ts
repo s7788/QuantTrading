@@ -130,24 +130,64 @@ export class DataSyncService {
     }
   }
 
-  // ── Fetch real-time quotes from Yahoo Finance ─────────────
+  // ── Fetch real-time quotes via yahoo-finance2 (crumb handled internally) ─────
   async fetchQuotes(symbols: string[]): Promise<YahooQuoteResult[]> {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const results: any[] = await yf.quote(symbols, {}, { validateResult: false });
-    const arr = Array.isArray(results) ? results : (results ? [results] : []);
-    return arr.map((q) => ({
-      symbol: q.symbol,
-      regularMarketPrice: q.regularMarketPrice ?? undefined,
-      regularMarketChange: q.regularMarketChange ?? undefined,
-      regularMarketChangePercent: q.regularMarketChangePercent ?? undefined,
-      regularMarketVolume: q.regularMarketVolume ?? undefined,
-      regularMarketDayHigh: q.regularMarketDayHigh ?? undefined,
-      regularMarketDayLow: q.regularMarketDayLow ?? undefined,
-      regularMarketOpen: q.regularMarketOpen ?? undefined,
-      regularMarketPreviousClose: q.regularMarketPreviousClose ?? undefined,
-      longName: q.longName ?? undefined,
-      shortName: q.shortName ?? undefined,
-    }));
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const raw: any[] = await (yf as any).quote(symbols);
+      const quotes: YahooQuoteResult[] = (Array.isArray(raw) ? raw : [raw]).map((q: any) => ({
+        symbol: q.symbol,
+        regularMarketPrice: q.regularMarketPrice,
+        regularMarketChange: q.regularMarketChange,
+        regularMarketChangePercent: q.regularMarketChangePercent,
+        regularMarketVolume: q.regularMarketVolume ?? undefined,
+        regularMarketDayHigh: q.regularMarketDayHigh ?? undefined,
+        regularMarketDayLow: q.regularMarketDayLow ?? undefined,
+        regularMarketOpen: q.regularMarketOpen ?? undefined,
+        regularMarketPreviousClose: q.regularMarketPreviousClose ?? undefined,
+        longName: q.longName ?? undefined,
+        shortName: q.shortName ?? undefined,
+      }));
+      if (quotes.length > 0) return quotes;
+      throw new Error('Empty quote result');
+    } catch (err) {
+      logger.warn('[DataSync] fetchQuotes failed, falling back to OHLCV prices', { err: String(err) });
+      return this.fetchQuotesFallback(symbols);
+    }
+  }
+
+  // Fallback: derive price/change from OHLCV when quote API is unavailable
+  private async fetchQuotesFallback(symbols: string[]): Promise<YahooQuoteResult[]> {
+    const results = await Promise.allSettled(
+      symbols.map(async (sym): Promise<YahooQuoteResult | null> => {
+        try {
+          const ohlcv = await this.fetchYahooOHLCV(sym, {
+            period1: new Date(Date.now() - 7 * 86400_000),
+            interval: '1d',
+          });
+          if (!ohlcv.length) return null;
+          const last = ohlcv[ohlcv.length - 1];
+          const prev = ohlcv.length > 1 ? ohlcv[ohlcv.length - 2] : null;
+          const change = prev ? +(last.close - prev.close).toFixed(4) : 0;
+          const changePct = prev ? +((change / prev.close) * 100).toFixed(4) : 0;
+          return {
+            symbol: sym,
+            regularMarketPrice: last.close,
+            regularMarketChange: change,
+            regularMarketChangePercent: changePct,
+            regularMarketVolume: last.volume,
+            regularMarketDayHigh: last.high,
+            regularMarketDayLow: last.low,
+            regularMarketOpen: last.open,
+          };
+        } catch {
+          return null;
+        }
+      })
+    );
+    return results
+      .filter((r): r is PromiseFulfilledResult<YahooQuoteResult> => r.status === 'fulfilled' && r.value !== null)
+      .map((r) => r.value);
   }
 
   // ── Public getters ────────────────────────────────────────
