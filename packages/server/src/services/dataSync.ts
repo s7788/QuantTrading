@@ -49,6 +49,9 @@ interface TwseCompany {
   產業類別: string;
 }
 
+// ── Yahoo Finance auth (crumb + cookies) ──────────────────────
+interface YahooAuth { crumb: string; cookies: string; expiresAt: number }
+
 // ── In-memory OHLCV cache ──────────────────────────────────────
 interface CacheEntry { data: OHLCV[]; expiresAt: number }
 
@@ -70,6 +73,50 @@ export class DataSyncService {
     tw: { market: 'tw', lastSync: '', status: 'idle' },
     us: { market: 'us', lastSync: '', status: 'idle' },
   };
+
+  private yahooAuth: YahooAuth | null = null;
+  private yahooAuthInFlight: Promise<YahooAuth> | null = null;
+
+  private async getYahooAuth(): Promise<YahooAuth> {
+    if (this.yahooAuth && Date.now() < this.yahooAuth.expiresAt) {
+      return this.yahooAuth;
+    }
+    if (this.yahooAuthInFlight) {
+      return this.yahooAuthInFlight;
+    }
+    this.yahooAuthInFlight = this._fetchYahooAuth().finally(() => {
+      this.yahooAuthInFlight = null;
+    });
+    return this.yahooAuthInFlight;
+  }
+
+  private async _fetchYahooAuth(): Promise<YahooAuth> {
+    const ua = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+
+    // Step 1: get cookies from Yahoo consent gate
+    const initRes = await axios.get('https://fc.yahoo.com', {
+      timeout: 10_000,
+      validateStatus: () => true,
+      headers: { 'User-Agent': ua },
+    });
+    const setCookies = initRes.headers['set-cookie'] as string[] | string | undefined;
+    const cookies = Array.isArray(setCookies)
+      ? setCookies.map(c => c.split(';')[0]).join('; ')
+      : typeof setCookies === 'string' ? setCookies.split(';')[0] : '';
+
+    // Step 2: get crumb
+    const crumbRes = await axios.get('https://query1.finance.yahoo.com/v1/test/getcrumb', {
+      timeout: 10_000,
+      headers: { 'Cookie': cookies, 'User-Agent': ua },
+    });
+    const crumb = String(crumbRes.data);
+    if (!crumb || crumb.includes('<')) throw new Error('Invalid crumb response');
+
+    const auth: YahooAuth = { crumb, cookies, expiresAt: Date.now() + 4 * 60 * 60 * 1000 };
+    this.yahooAuth = auth;
+    logger.info('[DataSync] Yahoo Finance auth refreshed');
+    return auth;
+  }
 
   async sync(market: Market): Promise<void> {
     this.status[market].status = 'syncing';
@@ -151,16 +198,64 @@ export class DataSyncService {
 
   // ── Fetch real-time quotes from Yahoo Finance ─────────────
   async fetchQuotes(symbols: string[]): Promise<YahooQuoteResult[]> {
-    const url = `https://query1.finance.yahoo.com/v7/finance/quote`;
-    const { data } = await axios.get<YahooQuoteResponse>(url, {
-      params: {
-        symbols: symbols.join(','),
-        fields: 'regularMarketPrice,regularMarketChange,regularMarketChangePercent,regularMarketVolume,regularMarketDayHigh,regularMarketDayLow,regularMarketOpen,regularMarketPreviousClose,longName,shortName',
-      },
-      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
-      timeout: 30_000,
-    });
-    return data.quoteResponse?.result ?? [];
+    const ua = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36';
+    try {
+      const auth = await this.getYahooAuth();
+      const { data } = await axios.get<YahooQuoteResponse>(
+        'https://query1.finance.yahoo.com/v7/finance/quote',
+        {
+          params: {
+            symbols: symbols.join(','),
+            crumb: auth.crumb,
+            fields: 'regularMarketPrice,regularMarketChange,regularMarketChangePercent,regularMarketVolume,regularMarketDayHigh,regularMarketDayLow,regularMarketOpen,regularMarketPreviousClose,longName,shortName',
+          },
+          headers: { 'Cookie': auth.cookies, 'User-Agent': ua },
+          timeout: 30_000,
+        }
+      );
+      const results = data.quoteResponse?.result ?? [];
+      if (results.length > 0) return results;
+      throw new Error('Empty quote result');
+    } catch (err) {
+      // Invalidate auth on failure so next call refreshes crumb
+      this.yahooAuth = null;
+      logger.warn('[DataSync] fetchQuotes failed, falling back to OHLCV prices', { err: String(err) });
+      return this.fetchQuotesFallback(symbols);
+    }
+  }
+
+  // Fallback: derive price/change from v8/chart OHLCV (no crumb needed)
+  private async fetchQuotesFallback(symbols: string[]): Promise<YahooQuoteResult[]> {
+    const results = await Promise.allSettled(
+      symbols.map(async (sym): Promise<YahooQuoteResult | null> => {
+        try {
+          const ohlcv = await this.fetchYahooOHLCV(sym, {
+            period1: new Date(Date.now() - 7 * 86400_000),
+            interval: '1d',
+          });
+          if (!ohlcv.length) return null;
+          const last = ohlcv[ohlcv.length - 1];
+          const prev = ohlcv.length > 1 ? ohlcv[ohlcv.length - 2] : null;
+          const change = prev ? +(last.close - prev.close).toFixed(4) : 0;
+          const changePct = prev ? +((change / prev.close) * 100).toFixed(4) : 0;
+          return {
+            symbol: sym,
+            regularMarketPrice: last.close,
+            regularMarketChange: change,
+            regularMarketChangePercent: changePct,
+            regularMarketVolume: last.volume,
+            regularMarketDayHigh: last.high,
+            regularMarketDayLow: last.low,
+            regularMarketOpen: last.open,
+          };
+        } catch {
+          return null;
+        }
+      })
+    );
+    return results
+      .filter((r): r is PromiseFulfilledResult<YahooQuoteResult> => r.status === 'fulfilled' && r.value !== null)
+      .map((r) => r.value);
   }
 
   // ── Public getters ────────────────────────────────────────

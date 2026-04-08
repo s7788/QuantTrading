@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Search, TrendingUp, Brain, Zap, AlertTriangle } from 'lucide-react';
 import { PageHeader, SectionCard, TabBar, Badge, DataTable, PnlText } from '@/components/common';
@@ -192,6 +192,34 @@ export default function TwStockPredictionPage() {
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [notFound, setNotFound] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [predictions, setPredictions] = useState<PredStock[]>(TOP_PREDICTIONS);
+  const [pricesLoading, setPricesLoading] = useState(true);
+
+  // Fetch real current prices for all prediction stocks
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all(
+      TOP_PREDICTIONS.map(async (stock) => {
+        try {
+          const res = await getSymbolData('tw', stock.symbol) as any;
+          const price: number | undefined = res?.data?.quote?.price ?? res?.data?.ohlcv?.at?.(-1)?.close;
+          if (price && price > 0) return { symbol: stock.symbol, price };
+        } catch {}
+        return null;
+      })
+    ).then((results) => {
+      if (cancelled) return;
+      const priceMap: Record<string, number> = {};
+      for (const r of results) {
+        if (r) priceMap[r.symbol] = r.price;
+      }
+      setPredictions(prev =>
+        prev.map(s => priceMap[s.symbol] != null ? { ...s, price: priceMap[s.symbol] } : s)
+      );
+      setPricesLoading(false);
+    });
+    return () => { cancelled = true; };
+  }, []);
 
   const handleSearch = async () => {
     const code = query.trim().toUpperCase();
@@ -201,17 +229,18 @@ export default function TwStockPredictionPage() {
     setResult(null);
     setAnalysisCode(code);
 
-    // Use rich mock data for curated stocks; fetch real data for everything else
-    if (STOCK_DB[code]) {
-      setTimeout(() => { setLoading(false); setResult(STOCK_DB[code]); }, 600);
-      return;
-    }
-
     try {
       const res = await getSymbolData('tw', code) as any;
       const ohlcv: {close:number}[] = res?.data?.ohlcv ?? [];
       if (!ohlcv.length) { setNotFound(true); return; }
-      setResult(buildAnalysisFromOHLCV(code, code, '—', ohlcv));
+      // Merge real OHLCV analysis with curated narrative factors if available
+      const computed = buildAnalysisFromOHLCV(code, STOCK_DB[code]?.name ?? code, '—', ohlcv);
+      if (STOCK_DB[code]) {
+        computed.factors = STOCK_DB[code].factors;
+        computed.risk = STOCK_DB[code].risk;
+        computed.name = STOCK_DB[code].name;
+      }
+      setResult(computed);
     } catch {
       setNotFound(true);
     } finally {
@@ -274,13 +303,16 @@ export default function TwStockPredictionPage() {
           title="最有可能上漲的台股 Top 10"
           actions={
             <div className="flex items-center gap-1.5 text-xs" style={{color:'var(--color-text-2)'}}>
-              <Zap size={12}/> 每日開盤前更新
+              {pricesLoading
+                ? <><TrendingUp size={12} className="animate-pulse"/> 載入即時報價中…</>
+                : <><Zap size={12}/> 即時報價 · 每日開盤前更新</>
+              }
             </div>
           }
         >
           <DataTable
             columns={cols}
-            data={TOP_PREDICTIONS}
+            data={predictions}
             rowKey={(r)=>r.symbol}
             onRowClick={(r)=>navigate(`/analytics/symbol/tw/${r.symbol}`)}
             emptyText="暫無預測資料"
