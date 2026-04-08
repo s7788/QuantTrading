@@ -21,6 +21,27 @@ interface YahooChartResponse {
   };
 }
 
+interface YahooQuoteResult {
+  symbol: string;
+  regularMarketPrice?: number;
+  regularMarketChange?: number;
+  regularMarketChangePercent?: number;
+  regularMarketVolume?: number;
+  regularMarketDayHigh?: number;
+  regularMarketDayLow?: number;
+  regularMarketOpen?: number;
+  regularMarketPreviousClose?: number;
+  longName?: string;
+  shortName?: string;
+}
+
+interface YahooQuoteResponse {
+  quoteResponse?: {
+    result?: YahooQuoteResult[];
+    error?: unknown;
+  };
+}
+
 // TWSE Open API response shape (openapi.twse.com.tw)
 interface TwseCompany {
   公司代號: string;
