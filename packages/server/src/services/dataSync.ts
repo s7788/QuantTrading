@@ -1,27 +1,15 @@
 import axios from 'axios';
+import YahooFinance from 'yahoo-finance2';
 import type { Market, OHLCV, Symbol, DataSyncStatus } from '@quant/shared';
+
+// yahoo-finance2 v2.14.x exports the class (not a singleton). Instantiate once
+// so the crumb/cookie jar is reused across requests.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const yf = new (YahooFinance as any)() as InstanceType<typeof YahooFinance>;
 import { logger } from '../utils/logger.js';
 import { getFirestore, Collections } from './firestore.js';
 
-interface YahooChartResponse {
-  chart?: {
-    result?: Array<{
-      timestamp?: number[];
-      indicators?: {
-        quote?: Array<{
-          open?: Array<number | null>;
-          high?: Array<number | null>;
-          low?: Array<number | null>;
-          close?: Array<number | null>;
-          volume?: Array<number | null>;
-        }>;
-      };
-    }>;
-    error?: { description?: string };
-  };
-}
-
-interface YahooQuoteResult {
+export interface YahooQuoteResult {
   symbol: string;
   regularMarketPrice?: number;
   regularMarketChange?: number;
@@ -33,13 +21,6 @@ interface YahooQuoteResult {
   regularMarketPreviousClose?: number;
   longName?: string;
   shortName?: string;
-}
-
-interface YahooQuoteResponse {
-  quoteResponse?: {
-    result?: YahooQuoteResult[];
-    error?: unknown;
-  };
 }
 
 // TWSE Open API response shape (openapi.twse.com.tw)
@@ -198,6 +179,7 @@ export class DataSyncService {
 
   // ── Fetch real-time quotes from Yahoo Finance ─────────────
   async fetchQuotes(symbols: string[]): Promise<YahooQuoteResult[]> {
+
     const ua = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36';
     try {
       const auth = await this.getYahooAuth();
@@ -256,6 +238,7 @@ export class DataSyncService {
     return results
       .filter((r): r is PromiseFulfilledResult<YahooQuoteResult> => r.status === 'fulfilled' && r.value !== null)
       .map((r) => r.value);
+
   }
 
   // ── Public getters ────────────────────────────────────────
@@ -360,28 +343,31 @@ export class DataSyncService {
   }
 
   // ── Yahoo Finance OHLCV fetch ─────────────────────────────
+  // Uses yf._fetch so the shared cookie/crumb jar handles auth automatically.
   private async fetchYahooOHLCV(
     symbol: string,
     options: { period1?: string | Date; period2?: string | Date; interval: '1d' | '1wk' }
   ): Promise<OHLCV[]> {
-    const period1 = this.toUnixTimestamp(options.period1 ?? new Date(Date.now() - 365 * 86400_000));
-    const period2 = this.toUnixTimestamp(options.period2 ?? new Date());
-    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}`;
+    const toUnix = (v: string | Date | number | undefined, fallback: number) =>
+      Math.floor(((v instanceof Date ? v : v ? new Date(v) : new Date(fallback)).getTime()) / 1000);
 
-    const { data } = await axios.get<YahooChartResponse>(url, {
-      params: {
-        interval: options.interval,
-        period1,
-        period2,
-        includePrePost: false,
-        events: 'div,splits',
-      },
-      timeout: 30_000,
-    });
+    const period1 = toUnix(options.period1, Date.now() - 365 * 86400_000);
+    const period2 = toUnix(options.period2, Date.now());
+
+    // Use yf._fetch (authenticated via the shared crumb/cookie jar) to call the
+    // v8 chart API. The ${YF_QUERY_HOST} template is substituted internally.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const data: any = await (yf as any)._fetch(
+      `https://\${YF_QUERY_HOST}/v8/finance/chart/${encodeURIComponent(symbol)}`,
+      { interval: options.interval, period1, period2, includePrePost: false, events: 'div,splits' },
+      {},
+      'json',
+      true,  // needsCrumb
+    );
 
     const result = data.chart?.result?.[0];
     const quote  = result?.indicators?.quote?.[0];
-    const timestamps = result?.timestamp ?? [];
+    const timestamps: number[] = result?.timestamp ?? [];
 
     if (!result || !quote) {
       const message = data.chart?.error?.description || `Yahoo chart missing data for ${symbol}`;
@@ -394,15 +380,8 @@ export class DataSyncService {
       const low    = quote.low?.[index];
       const close  = quote.close?.[index];
       const volume = quote.volume?.[index];
-
-      if (open == null || high == null || low == null || close == null || volume == null) {
-        return [];
-      }
-
-      return [{
-        date: new Date(timestamp * 1000).toISOString().slice(0, 10),
-        open, high, low, close, volume,
-      }];
+      if (open == null || high == null || low == null || close == null || volume == null) return [];
+      return [{ date: new Date(timestamp * 1000).toISOString().slice(0, 10), open, high, low, close, volume }];
     });
   }
 
@@ -445,8 +424,5 @@ export class DataSyncService {
     await db.collection(Collections.DATA_STATUS).doc(market).set(this.status[market]);
   }
 
-  private toUnixTimestamp(value: string | Date): number {
-    const date = value instanceof Date ? value : new Date(value);
-    return Math.floor(date.getTime() / 1000);
-  }
+
 }
