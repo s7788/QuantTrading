@@ -48,7 +48,13 @@ analyticsRouter.get('/market-overview', async (req: Request, res: Response) => {
   }
 
   try {
-    const quotes = await syncService.fetchQuotes([...indexSymbols, ...moverSymbols]);
+    // Fetch quotes; on failure return empty arrays so the page still loads
+    let quotes: Awaited<ReturnType<typeof syncService.fetchQuotes>> = [];
+    try {
+      quotes = await syncService.fetchQuotes([...indexSymbols, ...moverSymbols]);
+    } catch (quoteErr) {
+      logger.warn('[analytics] fetchQuotes failed, returning empty market data', { quoteErr });
+    }
 
     const indices = indexSymbols
       .map((sym) => {
@@ -79,11 +85,17 @@ analyticsRouter.get('/market-overview', async (req: Request, res: Response) => {
       .filter((m) => m.price > 0);
 
     const topGainers = [...movers].sort((a, b) => b.changePercent - a.changePercent).slice(0, 5);
-    const topLosers = [...movers].sort((a, b) => a.changePercent - b.changePercent).slice(0, 5);
+    const topLosers  = [...movers].sort((a, b) => a.changePercent - b.changePercent).slice(0, 5);
 
+    const partial = quotes.length === 0;
     const responseData = { indices, topGainers, topLosers, sectors: [] };
     overviewCache.set(cacheKey, { data: responseData, expiresAt: Date.now() + OVERVIEW_TTL_MS });
-    return res.json({ success: true, data: responseData, market });
+    return res.json({
+      success: true,
+      data: responseData,
+      market,
+      ...(partial && { warning: 'Market quote service temporarily unavailable' }),
+    });
   } catch (err) {
     logger.error('[analytics] market-overview error', { err });
     // Return stale cache if available rather than 500
